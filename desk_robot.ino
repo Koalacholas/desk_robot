@@ -4,9 +4,9 @@ Servo baseServo;
 Servo shoulderServo;
 Servo elbowServo;
 
-int basePos = 90;
-int shoulderPos = 90;
-int elbowPos = 90;
+int basePos = 115;      // Default Base position
+int shoulderPos = 35;   // Default Shoulder position
+int elbowPos = 185;     // Default Elbow position
 
 int basePositions[9];
 int shoulderPositions[9];
@@ -14,156 +14,133 @@ int elbowPositions[9];
 int currentPositionIndex = 0; // Tracks the current save slot
 
 bool isPlayingBack = false;
+bool joystickMode = false;
 
-enum InterpolationMode {
-  LINEAR,
-  SCURVE
-};
+const int joystickYPin = A0;  // Y-axis analog pin
+const int joystickXPin = A1;  // X-axis analog pin
+const int joystickBtnPin = 2; // Button pin
 
-InterpolationMode currentMode = LINEAR;
+int elbowMinPos = 90;   // Minimum elbow position
+int elbowMaxPos = 180;  // Maximum elbow position
+bool elbowUp = true;    // Track the direction of the elbow
 
 void setup() {
   baseServo.attach(9);
   shoulderServo.attach(10);
   elbowServo.attach(11);
   
+  // Move servos to default positions at startup
+  baseServo.write(basePos);
+  shoulderServo.write(shoulderPos);
+  elbowServo.write(elbowPos);
+  
   Serial.begin(115200);
   Serial.println("Robot arm control initialized");
+  Serial.println("Current Positions - Base: 115, Shoulder: 35, Elbow: 185");
   Serial.println("Send 'h' for help.");
+
+  pinMode(joystickBtnPin, INPUT_PULLUP); // Joystick button with pull-up resistor
 }
 
 void loop() {
-  if (Serial.available() > 0) {
-    char receivedChar = Serial.read();
-    switch (receivedChar) {
-      case 'm':
-        isPlayingBack = false;
-        Serial.println("Playback stopped by user.");
-        break;
-      case '0':
-        moveToHomePosition();
-        break;
-      case 'z':
-        adjustBasePosition(basePos - 5);
-        break;
-      case 'x':
-        adjustBasePosition(basePos + 5);
-        break;
-      case 'a':
-        adjustShoulderPosition(shoulderPos - 5);
-        break;
-      case 's':
-        adjustShoulderPosition(shoulderPos + 5);
-        break;
-      case 'q':
-        adjustElbowPosition(elbowPos - 5);
-        break;
-      case 'w':
-        adjustElbowPosition(elbowPos + 5);
-        break;
-      case 't': // Toggle interpolation mode
-        toggleInterpolationMode();
-        break;
-      case 'h':
-        printHelpMenu();
-        break;
-      case 'l':
-        listSavedPositions();
-        break;
-      case 'e':
-        echoCurrentPositions();
-        break;
-      case 'k':
-        saveCurrentPosition();
-        break;
-      case '/':
-        clearSavedPositions();
-        break;
-      case 'n':
-        playbackPositions();
-        break;
-      default:
-        if (receivedChar >= '1' && receivedChar <= '9') {
-          recallSavedPosition(receivedChar);
-        } else {
-          Serial.println("Invalid command. Send 'h' for help.");
-        }
-        break;
+  if (joystickMode) {
+    handleJoystickControl();
+  } else {
+    if (Serial.available() > 0) {
+      char receivedChar = Serial.read();
+      switch (receivedChar) {
+        case 'm':
+          isPlayingBack = false;
+          Serial.println("Playback stopped by user.");
+          break;
+        case '0':
+          moveToHomePosition();
+          break;
+        case 'z':
+          adjustBasePosition(basePos - 5);
+          break;
+        case 'x':
+          adjustBasePosition(basePos + 5);
+          break;
+        case 'a':
+          adjustShoulderPosition(shoulderPos - 5);
+          break;
+        case 's':
+          adjustShoulderPosition(shoulderPos + 5);
+          break;
+        case 'q':
+          adjustElbowPosition(elbowPos - 5);
+          break;
+        case 'w':
+          adjustElbowPosition(elbowPos + 5);
+          break;
+        case 'h':
+          printHelpMenu();
+          break;
+        case 'l':
+          listSavedPositions();
+          break;
+        case 'e':
+          echoCurrentPositions();
+          break;
+        case 'k':
+          saveCurrentPosition();
+          break;
+        case '/':
+          clearSavedPositions();
+          break;
+        case 'n':
+          playbackPositions();
+          break;
+        case 'j':
+          toggleJoystickMode();
+          break;
+        default:
+          if (receivedChar >= '1' && receivedChar <= '9') {
+            recallSavedPosition(receivedChar);
+          } else {
+            Serial.println("Invalid command. Send 'h' for help.");
+          }
+          break;
+      }
+      delay(10); // Small delay to keep the loop responsive
     }
-    delay(10); // Small delay to keep the loop responsive
   }
-}
-
-void toggleInterpolationMode() {
-  currentMode = (currentMode == LINEAR) ? SCURVE : LINEAR;
-  Serial.print("Interpolation mode set to: ");
-  Serial.println(currentMode == LINEAR ? "LINEAR" : "SCURVE");
-}
-
-void adjustPositionWithInterpolation(Servo& servo, int& currentPosition, int targetPosition) {
-  int steps = 50; // Number of steps for interpolation
-  int delayTime = 20; // Delay between steps to control speed
-  for (int i = 0; i <= steps; i++) {
-    float t = (float)i / (float)steps;
-    float newPos;
-
-    if (currentMode == LINEAR) {
-      newPos = currentPosition + (targetPosition - currentPosition) * t;
-    } else { // SCURVE
-      float s = sCurveInterpolation(t);
-      newPos = currentPosition + (targetPosition - currentPosition) * s;
-    }
-
-    servo.write((int)newPos);
-    delay(delayTime);
-  }
-  currentPosition = targetPosition;
-}
-
-float sCurveInterpolation(float t) {
-  // S-Curve equation, for example, ease-in-out cubic
-  return t < 0.5 ? 4 * t * t * t : 1 - pow(-2 * t + 2, 3) / 2;
 }
 
 void adjustBasePosition(int newPos) {
-  // Apply interpolation based on current mode
-  if (currentMode == SCURVE) {
-    // S-curve interpolation logic here
-  }
-  baseServo.write(newPos); // Placeholder for actual movement logic
+  baseServo.write(newPos);
   basePos = newPos;
 }
 
 void adjustShoulderPosition(int newPos) {
-  // Apply interpolation based on current mode
-  if (currentMode == SCURVE) {
-    // S-curve interpolation logic here
+  // Limit the shoulder position to a maximum of 60 degrees
+  if (newPos > 60) {
+    newPos = 60;
   }
-  shoulderServo.write(newPos); // Placeholder for actual movement logic
+  shoulderServo.write(newPos);
   shoulderPos = newPos;
 }
 
 void adjustElbowPosition(int newPos) {
-  // Apply interpolation based on current mode
-  if (currentMode == SCURVE) {
-    // S-curve interpolation logic here
-  }
-  elbowServo.write(newPos); // Placeholder for actual movement logic
+  elbowServo.write(newPos);
   elbowPos = newPos;
 }
 
 void moveToHomePosition() {
   baseServo.write(90);
-  shoulderServo.write(90);
+  shoulderServo.write(60);  // Set to the maximum allowed position
   elbowServo.write(90);
-  basePos = shoulderPos = elbowPos = 90;
+  basePos = 90;
+  shoulderPos = 60;  // Set to the maximum allowed position
+  elbowPos = 90;
   Serial.println("Moved to home position.");
 }
 
 void printHelpMenu() {
   Serial.println("Help Menu:");
   Serial.println("z/x - Decrease/Increase Base Position");
-  Serial.println("a/s - Decrease/Increase Shoulder Position");
+  Serial.println("a/s - Decrease/Increase Shoulder Position (limited to 60 degrees)");
   Serial.println("q/w - Decrease/Increase Elbow Position");
   Serial.println("k - Save Current Position");
   Serial.println("1-9 - Recall Saved Position");
@@ -172,7 +149,7 @@ void printHelpMenu() {
   Serial.println("/ - Clear Saved Positions");
   Serial.println("n/m - Start/Stop Position Playback");
   Serial.println("0 - Move to Home Position");
-  Serial.println("t - Toggle Interpolation Mode");
+  Serial.println("j - Toggle Joystick Mode");
 }
 
 void listSavedPositions() {
@@ -231,59 +208,68 @@ void clearSavedPositions() {
   Serial.println("All positions cleared.");
 }
 
-int calculateNewPosition(int currentPos, int targetPos, float t, InterpolationMode mode) {
-  float newPos;
-  if (mode == LINEAR) {
-    newPos = currentPos + (targetPos - currentPos) * t;
-  } else { // SCURVE
-    float s = sCurveInterpolation(t);
-    newPos = currentPos + (targetPos - currentPos) * s;
-  }
-  return (int)newPos;
-}
-
 void playbackPositions() {
   Serial.println("Playback started. Press 'm' to stop.");
   isPlayingBack = true;
-  const int steps = 50; // Number of steps for interpolation
-  const int delayTime = 20; // Delay between steps to control speed
 
   while (isPlayingBack) { // Loop to keep playing back positions until stopped
     for (int posIndex = 0; posIndex < currentPositionIndex && isPlayingBack; ++posIndex) {
-      for (int step = 0; step <= steps; step++) {
-        float t = (float)step / (float)steps;
+      baseServo.write(basePositions[posIndex]);
+      shoulderServo.write(shoulderPositions[posIndex]);
+      elbowServo.write(elbowPositions[posIndex]);
 
-        // Calculate new positions for each servo at this step
-        int newBasePos = calculateNewPosition(basePos, basePositions[posIndex], t, currentMode);
-        int newShoulderPos = calculateNewPosition(shoulderPos, shoulderPositions[posIndex], t, currentMode);
-        int newElbowPos = calculateNewPosition(elbowPos, elbowPositions[posIndex], t, currentMode);
+      delay(500); // Adjust this delay for the speed of movement between positions
 
-        // Apply the new positions to the servos
-        baseServo.write(newBasePos);
-        shoulderServo.write(newShoulderPos);
-        elbowServo.write(newElbowPos);
-
-        delay(delayTime);
-
-        // Check for stop command
-        if (Serial.available() > 0) {
-          char cmd = Serial.read();
-          if (cmd == 'm') {
-            Serial.println("Playback stopped.");
-            isPlayingBack = false;
-            break; // Exit the step loop
-          }
-        }
-      }
       // Update current positions to the target for the next round
       basePos = basePositions[posIndex];
       shoulderPos = shoulderPositions[posIndex];
       elbowPos = elbowPositions[posIndex];
 
-      if (!isPlayingBack) break; // Exit if playback was stopped
+      // Check for stop command
+      if (Serial.available() > 0) {
+        char cmd = Serial.read();
+        if (cmd == 'm') {
+          Serial.println("Playback stopped.");
+          isPlayingBack = false;
+          break; // Exit the loop
+        }
+      }
     }
   }
 }
 
+void toggleJoystickMode() {
+  joystickMode = !joystickMode;
+  if (joystickMode) {
+    Serial.println("Joystick mode activated.");
+  } else {
+    Serial.println("Joystick mode deactivated.");
+  }
+}
 
+void handleJoystickControl() {
+  int yValue = analogRead(joystickYPin); // Read Y-axis
+  int xValue = analogRead(joystickXPin); // Read X-axis
+  bool buttonPressed = digitalRead(joystickBtnPin) == LOW; // Read button (active low)
 
+  // Map joystick values to servo positions (inverted for X-axis)
+  int newBasePos = map(xValue, 0, 1023, 180, 0); // Invert left-right control
+  int newShoulderPos = map(yValue, 0, 1023, 0, 60); // Limited to 60 degrees
+
+  adjustBasePosition(newBasePos);
+  adjustShoulderPosition(newShoulderPos);
+
+  if (buttonPressed) {
+    if (elbowUp) {
+      adjustElbowPosition(elbowMaxPos);
+    } else {
+      adjustElbowPosition(elbowMinPos);
+    }
+    elbowUp = !elbowUp; // Toggle the elbow direction
+    Serial.print("Button pressed - Elbow moved to ");
+    Serial.println(elbowUp ? "max" : "min");
+    delay(300); // Debounce delay to prevent multiple triggers
+  }
+
+  delay(100); // Small delay to avoid too rapid updates
+}
